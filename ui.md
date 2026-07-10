@@ -98,8 +98,15 @@ md:grid-cols-3`; featured first card spans 2 (`big`).
 - **Loading:** `label-mono text-muted-foreground` "Loading…"
 - **Empty:** hard-bordered card, `font-display` headline + one wry muted line + accent CTA
   ("The stage is empty." / "Nothing on display.")
+- **Moderation status:** hard-bordered mono pills — `bg-acid` (approved), `bg-secondary` (pending),
+  `bg-destructive text-white` (rejected). Used in Backstage rows (`/admin`) and as owner-facing
+  banners on the project page / editor / dashboard.
 - **Pending:** disable + swap label ("Saving…")
 - **Errors:** inline `text-destructive text-sm`; route errors → brand 404 ("No such slop").
+- **Embed player:** when a project plays an embedded URL (no zip), a small `label-mono
+text-muted-foreground text-xs` caption sits under the frame linking the embed hostname —
+  "Embedded from `<host>` — if it stays blank, the site blocks embedding." The editor's embed URL
+  input lives under the zip dropzone in "The thing itself" (standard `Input` + `label-mono` label).
 
 ## Voice / copy
 

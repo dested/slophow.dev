@@ -4,6 +4,7 @@ import type { TRPCOptionsProxy } from '@trpc/tanstack-react-query'
 import { authClient } from '~/lib/auth-client'
 import type { Session } from '../../server/auth'
 import type { AppRouter } from '../../server/router'
+import { AdminPage } from './admin'
 import { BrowsePage } from './browse'
 import { DashboardPage } from './dashboard'
 import { EditorPage } from './editor'
@@ -59,6 +60,17 @@ async function requireSession({ context }: LoaderFunctionArgs): Promise<RootLoad
       : await fetchClientSession()
   if (!session) throw redirect('/sign-in')
   return { session }
+}
+
+async function requireAdmin(args: LoaderFunctionArgs): Promise<RootLoaderData> {
+  const data = await requireSession(args)
+  const isAdmin = (data.session?.user as { isAdmin?: boolean } | undefined)?.isAdmin
+  if (!isAdmin) throw redirect('/')
+  if (typeof window === 'undefined') {
+    const ctx = args.context as SsrLoaderContext
+    await ctx.queryClient.prefetchQuery(ctx.trpc.admin.list.queryOptions({ filter: 'pending' }))
+  }
+  return data
 }
 
 async function redirectIfSignedIn({ context }: LoaderFunctionArgs) {
@@ -119,6 +131,7 @@ export const routes: RouteObject[] = [
           return data
         },
       },
+      { path: 'admin', Component: AdminPage, loader: requireAdmin },
       // Catch-alls — every fixed route above wins first; usernames matching
       // fixed paths are rejected at claim time (server/usernames.ts).
       {

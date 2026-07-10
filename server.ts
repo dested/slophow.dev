@@ -16,9 +16,14 @@ import {
 import { env } from './server/env'
 import { formatError, log, requestLogger, startupBanner } from './server/logger'
 import { prisma } from './server/prisma'
+import { rateLimit } from './server/rate-limit'
 import { appRouter } from './server/router'
 import { createContext } from './server/trpc'
 import { recordEvent, STAT_KINDS, type StatKind } from './server/stats'
+
+// Uploads are cheap to abuse (disk + CPU on extraction). Cap per user per hour.
+const UPLOADS_PER_HOUR = 20
+const UPLOAD_WINDOW_MS = 60 * 60 * 1000
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isProd = process.env.NODE_ENV === 'production'
@@ -76,6 +81,11 @@ async function createServer() {
       try {
         const session = await sessionFromReq(req)
         if (!session) return void res.status(401).json({ error: 'Sign in first.' })
+        if (!rateLimit(`upload:${session.user.id}`, UPLOADS_PER_HOUR, UPLOAD_WINDOW_MS)) {
+          return void res.status(429).json({
+            error: "Whoa, that's a lot of uploads. Take a breather and try again shortly.",
+          })
+        }
         const projectId = String(req.query.projectId ?? '')
         const project = await prisma.project.findUnique({ where: { id: projectId } })
         if (!project || project.ownerId !== session.user.id) {
@@ -88,7 +98,15 @@ async function createServer() {
         const { size, fileCount } = extractBundle(project.id, version, req.body)
         await prisma.project.update({
           where: { id: project.id },
-          data: { bundleVersion: version, bundleSize: size },
+          data: {
+            bundleVersion: version,
+            bundleSize: size,
+            // New content re-enters the moderation queue — an approved project
+            // can't silently swap in a different (unreviewed) bundle.
+            ...(project.moderationStatus === 'approved'
+              ? { moderationStatus: 'pending', reviewNote: null, reviewedAt: null }
+              : {}),
+          },
         })
         res.json({ version, size, fileCount })
       } catch (e) {
@@ -108,6 +126,11 @@ async function createServer() {
       try {
         const session = await sessionFromReq(req)
         if (!session) return void res.status(401).json({ error: 'Sign in first.' })
+        if (!rateLimit(`upload:${session.user.id}`, UPLOADS_PER_HOUR, UPLOAD_WINDOW_MS)) {
+          return void res.status(429).json({
+            error: "Whoa, that's a lot of uploads. Take a breather and try again shortly.",
+          })
+        }
         if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
           return void res.status(400).json({ error: 'Empty upload.' })
         }
@@ -143,8 +166,7 @@ async function createServer() {
   // every bundle an opaque origin — uploaded HTML/JS can run but can't touch
   // slopshow cookies or storage, embedded or opened directly.
   const RUN_HEADERS = {
-    'Content-Security-Policy':
-      'sandbox allow-scripts allow-pointer-lock allow-popups allow-downloads allow-forms allow-modals',
+    'Content-Security-Policy': 'sandbox allow-scripts allow-pointer-lock allow-forms allow-modals',
     'X-Content-Type-Options': 'nosniff',
     // The version is in the URL, so aggressive caching is safe.
     'Cache-Control': 'public, max-age=31536000, immutable',
@@ -161,7 +183,12 @@ async function createServer() {
   // Uploaded cover images.
   app.use(
     '/files/images',
-    express.static(imagesDir, { immutable: true, maxAge: '30d', index: false })
+    express.static(imagesDir, {
+      immutable: true,
+      maxAge: '30d',
+      index: false,
+      setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
+    })
   )
 
   app.use(
@@ -227,12 +254,15 @@ async function createServer() {
         render = (await import('./dist/server/entry-server.js')).render
       }
 
-      const { html: appHtml, status, dehydratedState } = await render(req)
+      const { html: appHtml, status, head, dehydratedState } = await render(req)
 
       const stateScript = `<script>window.__SSR_STATE__ = ${jsonForScript({ dehydratedState })}</script>`
+      // Function replacers: head/appHtml carry user content that may include `$`,
+      // which String.replace would otherwise treat as a substitution pattern.
       const html = template
+        .replace('<!--app-head-->', () => head)
         .replace('<!--app-state-->', stateScript)
-        .replace('<!--app-html-->', appHtml)
+        .replace('<!--app-html-->', () => appHtml)
 
       res.status(status).set({ 'Content-Type': 'text/html' }).end(html)
     } catch (e: unknown) {

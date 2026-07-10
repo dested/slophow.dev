@@ -50,9 +50,18 @@ export function DashboardPage() {
               <div className="min-w-0">
                 <p className="font-display truncate text-xl uppercase">{p.title}</p>
                 <p className="label-mono text-muted-foreground mt-1">
-                  {p.published ? 'Live' : 'Draft'} ·{' '}
-                  {p.bundleVersion > 0 ? `bundle v${p.bundleVersion}` : 'no bundle'}
+                  {statusLabel(p)} ·{' '}
+                  {p.bundleVersion > 0
+                    ? `bundle v${p.bundleVersion}`
+                    : p.embedUrl
+                      ? 'embed'
+                      : 'no bundle'}
                 </p>
+                {p.published && p.moderationStatus === 'rejected' && (
+                  <p className="label-mono text-destructive mt-1">
+                    Rejected{p.reviewNote ? ` — ${p.reviewNote}` : ''}
+                  </p>
+                )}
               </div>
               <div className="label-mono ml-auto flex gap-5 text-right">
                 <Tile label="views" value={p.viewCount} />
@@ -90,6 +99,15 @@ export function DashboardPage() {
       </div>
     </div>
   )
+}
+
+// The owner's-eye view of where a project stands: a draft is theirs alone; once
+// published it waits in review, then goes Live (approved) or shows as Rejected.
+function statusLabel(p: { published: boolean; moderationStatus: string }): string {
+  if (!p.published) return 'Draft'
+  if (p.moderationStatus === 'approved') return 'Live'
+  if (p.moderationStatus === 'rejected') return 'Rejected'
+  return 'In review'
 }
 
 function Tile({ label, value }: { label: string; value: number }) {

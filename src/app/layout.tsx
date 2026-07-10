@@ -22,6 +22,7 @@ export function Layout() {
   const data = useRouteLoaderData('root') as RootLoaderData | undefined
   const session = data?.session ?? null
   const username = (session?.user as { username?: string | null } | undefined)?.username
+  const isAdmin = (session?.user as { isAdmin?: boolean } | undefined)?.isAdmin
   const navigate = useNavigate()
   const revalidator = useRevalidator()
 
@@ -44,6 +45,11 @@ export function Layout() {
           {session && (
             <NavLink to="/dashboard" className={navLinkClass}>
               Dashboard
+            </NavLink>
+          )}
+          {isAdmin && (
+            <NavLink to="/admin" className={navLinkClass}>
+              Backstage
             </NavLink>
           )}
           <div className="ml-auto flex items-center gap-4">

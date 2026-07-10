@@ -48,7 +48,8 @@ server/
 │                        (dedupe + counter bump in one tx), dailySeries (raw SQL group-by).
 ├── router.ts            appRouter: config, me, profile.{update,byUsername},
 │                        projects.{home,browse,get,mine,create,update,delete,stats},
-│                        admin.setFeatured. Exports ProjectCard type (card shape on the wire).
+│                        admin.{list,review,setFeatured,remove}. PUBLIC_WHERE gate =
+│                        published && moderationStatus:approved. Exports ProjectCard type.
 ├── trpc.ts              createContext + public/protectedProcedure (unchanged from template)
 ├── prisma.ts / logger.ts  unchanged from template
 src/
@@ -63,7 +64,9 @@ src/
 │   │                    card, view/play/click beacons, admin feature button
 │   ├── editor.tsx       /new + /:username/:slug/edit — metadata form, zip dropzone, cover
 │   │                    upload, publish/unpublish, delete
-│   ├── dashboard.tsx    /dashboard — project rows + expandable stats (14-day bars, referrers)
+│   ├── dashboard.tsx    /dashboard — project rows (Live/In review/Rejected) + expandable stats
+│   ├── admin.tsx        /admin — Backstage: moderation queue (approve/reject/feature/delete),
+│   │                    filter tabs + search (admin-only)
 │   ├── settings.tsx     /settings — username/bio/links/accent picker
 │   ├── sign-in.tsx / sign-up.tsx  auth cards + GitHubButton
 │   └── error-boundary.tsx  404 / error page, brand-styled
@@ -105,6 +108,7 @@ data/                    (gitignored) DATA_DIR: bundles/<projectId>/<version>/, 
 | `/new`                                 | Create draft (protected)             | `src/app/editor.tsx`       |
 | `/dashboard`                           | Your projects + stats (protected)    | `src/app/dashboard.tsx`    |
 | `/settings`                            | Profile customization (protected)    | `src/app/settings.tsx`     |
+| `/admin`                               | Backstage moderation queue (admin)   | `src/app/admin.tsx`        |
 | `/sign-in` · `/sign-up`                | Auth                                 | `src/app/sign-{in,up}.tsx` |
 | `/:username`                           | Builder profile                      | `src/app/profile.tsx`      |
 | `/:username/:slug`                     | Project page (player + receipt)      | `src/app/project.tsx`      |
@@ -121,13 +125,30 @@ data/                    (gitignored) DATA_DIR: bundles/<projectId>/<version>/, 
 ### Hosted bundles (the core feature)
 
 Upload: client POSTs the zip bytes raw (`src/lib/api.ts`) → `extractBundle` validates (no `..`/
-absolute/drive paths, ≤2000 files, ≤200MB uncompressed, must contain `index.html`; a single
-wrapping folder is auto-stripped) → files land in `DATA_DIR/bundles/<projectId>/<version>/`;
-version bumps on each upload and old versions are deleted. Serving: `/run/:id/:version/*` sends
-files with `Content-Security-Policy: sandbox allow-scripts ...` and **no allow-same-origin** —
-the bundle gets an opaque origin whether iframed or opened directly, so uploaded JS can't touch
-slopshow cookies/storage. The iframe in `project.tsx` sets the same sandbox attribute. The version
-in the URL makes aggressive caching safe.
+absolute/drive paths, ≤2000 files, must contain `index.html`; a single wrapping folder is
+auto-stripped) → files land in `DATA_DIR/bundles/<projectId>/<version>/`; version bumps on each
+upload and old versions are deleted. Serving: `/run/:id/:version/*` sends files with
+`Content-Security-Policy: sandbox allow-scripts allow-pointer-lock allow-forms allow-modals` and
+**no allow-same-origin** — the bundle gets an opaque origin whether iframed or opened directly, so
+uploaded JS can't touch slopshow cookies/storage. The iframe in `project.tsx` sets the same sandbox
+attribute (kept in sync by hand). The version in the URL makes aggressive caching safe.
+
+**Upload hardening** (`server/bundles.ts`): zip-bomb guard rejects **before** decompressing via
+fflate's `unzipSync` `filter` (each entry's `originalSize` from the zip header) — >50MB/file or
+
+> 200MB total throws, so a tiny crafted zip can't OOM the box. An **extension allowlist**
+> (`ALLOWED_EXTENSIONS`: html/js/css/json/wasm/images/audio/video/glb·gltf·bin/fonts/txt·md·xml·…)
+> rejects anything non-static (e.g. `.exe`), naming the offenders; `resolveBundleFile` re-checks it at
+> serve time (defense in depth). Cover images are validated by **magic bytes** (`sniffImage`), not the
+> Content-Type header, and `/files/images` sends `X-Content-Type-Options: nosniff`. Uploads are
+> rate-limited to **20/user/hour** (bundle + image share the bucket → 429; `server/rate-limit.ts`),
+> and `projects.create` caps a user at **100 projects**.
+
+**Alternative source — embed a URL** (`Project.embedUrl`, https-only): instead of a zip, a builder
+can paste a URL that plays in the same sandboxed iframe. Player source priority in `project.tsx` is
+**bundle → embedUrl → cover art only**; both playable sources share `IFRAME_SANDBOX` and fire the
+same play/click beacons. An embed-mode player shows a mono caption linking the embed hostname
+("if it stays blank, the site blocks embedding"). Set it under the zip dropzone in the editor.
 
 ### Stats
 
@@ -144,19 +165,44 @@ editable in `/settings`. `RESERVED_USERNAMES` in `server/usernames.ts` must cont
 path — `/:username` is a catch-all. Profile accent (masthead color) comes from `ACCENTS` presets in
 `src/lib/fmt.ts`.
 
-### Featuring / admin
+### Moderation / admin
 
-`User.isAdmin` (granted at signup when email ∈ `ADMIN_EMAILS`) shows a Feature/Unfeature button on
-project pages → `admin.setFeatured` → home's featured shelf (ordered by `featuredAt`).
+`User.isAdmin` (granted at signup when email ∈ `ADMIN_EMAILS`) unlocks **Backstage** (`/admin`,
+nav link + route guarded by `requireAdmin`). **Approval gate:** a project is publicly visible only
+when `published && moderationStatus === 'approved'` (the `PUBLIC_WHERE` filter, spread into every
+public query — home/browse/profile-of-others/`projects.get`). New projects and re-uploaded bundles
+land as `pending`; owners publish into a review queue, an admin approves (→ live) or rejects (→
+stays hidden, with a `reviewNote` shown back to the owner on the project/editor/dashboard).
+Procedures: `admin.list` (queue with filter tabs pending/approved/rejected/drafts/all + search +
+counts), `admin.review` ({decision, note}), `admin.setFeatured`, `admin.remove` (hard delete any
+project + files). Admins also see Approve/Reject/Feature inline on the project page; owners/admins
+can still preview their own non-live projects. Featuring still drives home's featured shelf
+(ordered by `featuredAt`). Re-uploading a bundle on an approved project resets it to `pending`
+(see `server.ts` upload handler) so unreviewed content can't silently swap in.
+
+### Link previews / per-page SSR head
+
+`index.html` has an `<!--app-head-->` placeholder (the static title/OG tags were removed).
+`entry-server.tsx` `render()` builds a `head` string after the loaders resolve — it reads the
+matched route (`routerContext.matches` leaf `route.path`/`params`) and pulls the already-prefetched
+data straight out of the query cache (`queryClient.getQueryData(trpc.….queryOptions(…).queryKey)`,
+no extra DB hit). Project pages get `«title» by @user — slopshow` + tagline/excerpt + absolute
+`og:image` (cover) + `summary_large_image`; profile pages get `@username — slopshow` + bio;
+everything else gets the site-wide default. **Only published+approved projects get a rich head** —
+drafts/pending/rejected and 404s fall back to the default (no leaked titles). All interpolated
+user input is HTML-escaped. `server.ts` swaps the placeholder for `head` (function replacer, so `$`
+in user content is safe). The client-side `usePageTitle` still handles client navigations.
 
 ## Data model
 
 Template auth models plus: `User` profile fields (username unique, bio, website, githubHandle,
 twitterHandle, accent, isAdmin) · `Project` (slug unique per owner, title/tagline/description,
-coverImage, externalUrl, published/featured, receipts: models[]/tools[]/costUsd/buildHours/
-humanPercent/promptNotes, bundleVersion/bundleSize, denormalized view/play/clickCount) ·
-`StatEvent` (projectId, kind, visitorHash, referrer). Projects are created as drafts
-(`published: false`) and go live via the editor's Publish button.
+coverImage, externalUrl, embedUrl (https-only embed source), published/featured, moderationStatus
+(pending|approved|rejected) + reviewNote/reviewedAt, receipts:
+models[]/tools[]/costUsd/buildHours/humanPercent/promptNotes,
+bundleVersion/bundleSize, denormalized view/play/clickCount) · `StatEvent` (projectId, kind,
+visitorHash, referrer). Projects are created as drafts (`published: false`, `moderationStatus:
+pending`); the owner's Publish button submits them to the admin review queue, not straight to live.
 
 ## Gotchas & hard rules
 
@@ -169,11 +215,17 @@ humanPercent/promptNotes, bundleVersion/bundleSize, denormalized view/play/click
 - **Windows dev: port 3000 may be double-bound.** Windows lets two processes listen on 3000
   without an error; if another dev server is running, requests race. Run
   `PORT=3005 BETTER_AUTH_URL=http://localhost:3005 bun run dev` when in doubt.
-- Local Postgres on this machine uses password `<redacted>` (see `.env`); e2e needs
-  `E2E_DATABASE_URL=postgres://postgres:<redacted>@localhost:5432/slopshow_test`.
+- Local Postgres credentials live in the gitignored `.env` (never commit them). e2e needs
+  `E2E_DATABASE_URL` pointing at your test DB, e.g.
+  `E2E_DATABASE_URL=postgres://postgres:<your-password>@localhost:5432/slopshow_test`.
 - Playwright screenshots pass `animations: 'disabled'` — the marquee/reveal animations are
   otherwise flaky in pixel diffs.
 - Uploads are raw-body POSTs (`express.raw`), NOT multipart — keep client and server in sync.
+- **Stored URLs must be http(s)** — `externalUrl`/`website`/`embedUrl` go through `httpish`/
+  `httpsOnly` in `router.ts` (zod `.url()` alone accepts `javascript:…`, an XSS vector once rendered
+  as an href). Reuse those helpers for any new user-supplied URL. `embedUrl` is https-only.
+- The `/run` CSP sandbox and `project.tsx` `IFRAME_SANDBOX` must stay identical and must NOT include
+  `allow-downloads`/`allow-popups`/`allow-same-origin`.
 - Receipt numeric fields (`costUsd`, `buildHours`, `humanPercent`) are nullable — "not reported"
   is a meaningful state the receipt renders differently.
 
@@ -182,11 +234,12 @@ humanPercent/promptNotes, bundleVersion/bundleSize, denormalized view/play/click
 - **Done** — full product: auth (email + optional GitHub), auto-claimed usernames, project CRUD
   with drafts, zip upload → sandboxed hosting, cover images, receipts, profiles with accent
   customization, home/browse feeds, stats (beacons, dedupe, dashboard chart, referrers), admin
-  featuring, brand design system, e2e suite (4 passing), Docker deploy files. Verified end-to-end
-  in a real browser 2026-07-10.
-- **Not built** — SSR per-page OG meta tags (client-side titles only — matters for link previews,
-  do before HN launch if possible), pagination on browse (takes 60), email verification, rate
-  limiting on uploads/hits, S3-compatible storage driver (local disk only), likes/comments,
-  GitHub OAuth app creds (env is wired, user must create the app).
+  featuring + moderation queue (approval gate: publish → review → approve/reject at /admin),
+  embed-a-URL alternative to zip uploads, upload hardening (zip-bomb/extension/magic-byte/rate
+  limits), SSR per-page OG meta tags, brand design system, e2e suite (4 passing), Docker deploy
+  files. Verified end-to-end in a real browser 2026-07-10.
+- **Not built** — pagination on browse (takes 60), email verification, per-visitor rate limiting on
+  `/api/hit` (uploads are limited; hits aren't), S3-compatible storage driver (local disk only),
+  likes/comments, GitHub OAuth app creds (env is wired, user must create the app).
 - **Next:** deploy to the VPS behind the slopshow.dev domain; create the GitHub OAuth app; seed a
   few real projects before launch.

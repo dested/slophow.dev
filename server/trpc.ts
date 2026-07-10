@@ -28,3 +28,11 @@ export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
   }
   return next({ ctx: { ...ctx, session: ctx.session } })
 })
+
+// Signed-in AND flagged isAdmin (granted at signup from ADMIN_EMAILS).
+export const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (!ctx.session.user.isAdmin) {
+    throw new TRPCError({ code: 'FORBIDDEN' })
+  }
+  return next({ ctx })
+})

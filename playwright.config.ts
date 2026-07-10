@@ -42,6 +42,9 @@ export default defineConfig({
       DATABASE_URL,
       BETTER_AUTH_SECRET: 'e2e-secret-at-least-32-characters-long!!',
       BETTER_AUTH_URL: baseURL,
+      // The fixed e2e user is an admin so the suite can exercise the full
+      // publish → review → approve moderation flow (see smoke.spec.ts).
+      ADMIN_EMAILS: 'ada@example.com',
     },
   },
 })

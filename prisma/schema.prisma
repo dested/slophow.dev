@@ -96,10 +96,19 @@ model Project {
   description String? // longer "how I built it" text (plain text w/ paragraphs)
   coverImage  String? @map("cover_image") // filename under DATA_DIR/images
   externalUrl String? @map("external_url") // optional "also live at" link
+  embedUrl    String? @map("embed_url") // optional URL to embed in the player instead of a zip
 
   published  Boolean   @default(true)
   featured   Boolean   @default(false)
   featuredAt DateTime? @map("featured_at")
+
+  // Admin moderation. Projects are only publicly visible when they are both
+  // published (owner's toggle) AND approved (admin's toggle). New projects and
+  // re-uploaded bundles land as 'pending'; an admin moves them to 'approved' or
+  // 'rejected' (with an optional note surfaced back to the owner).
+  moderationStatus String    @default("pending") @map("moderation_status") // pending | approved | rejected
+  reviewNote       String?   @map("review_note")
+  reviewedAt       DateTime? @map("reviewed_at")
 
   // AI receipts
   models       String[] @default([]) // e.g. ["Claude Opus 4.6"]
@@ -128,6 +137,7 @@ model Project {
   @@unique([ownerId, slug])
   @@index([featured, featuredAt])
   @@index([published, createdAt])
+  @@index([moderationStatus, createdAt])
   @@map("project")
 }
 

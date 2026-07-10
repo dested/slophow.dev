@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { strToU8, zipSync } from 'fflate'
 
 // Fixed user — the DB is truncated in global-setup, so this is deterministic
 // across runs (stable screenshots). The auto-claimed username will be
@@ -46,9 +47,31 @@ test('sign up → post slop → publish → project page shows the receipt', asy
   await page.getByRole('button', { name: 'Create draft' }).click()
   await page.waitForURL('**/ada-lovelace/analytical-engine-demo/edit')
 
-  // Publish it and check the public page + receipt.
+  // A zip with a disallowed file type (.exe) is refused with a 400 that names
+  // the offender — the bundle allowlist only accepts static-website content.
+  const badZip = Buffer.from(
+    zipSync({
+      'index.html': strToU8('<!doctype html><title>hi</title>'),
+      'evil.exe': strToU8('MZ this is not website content'),
+    })
+  )
+  const [badUpload] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/api/upload/bundle')),
+    page.locator('input[accept*="zip"]').setInputFiles({
+      name: 'bundle.zip',
+      mimeType: 'application/zip',
+      buffer: badZip,
+    }),
+  ])
+  expect(badUpload.status()).toBe(400)
+  await expect(page.getByText(/evil\.exe/)).toBeVisible()
+
+  // Publish it — this puts it in the moderation queue, not straight on stage.
   await page.getByRole('button', { name: 'Publish it' }).click()
   await expect(page.getByRole('button', { name: 'Unpublish' })).toBeVisible()
+  await expect(page.getByText(/In review/i)).toBeVisible()
+
+  // The owner can still preview the page + receipt while it's pending.
   await page.getByRole('link', { name: 'View page' }).click()
   await page.waitForURL('**/ada-lovelace/analytical-engine-demo')
   await expect(page.getByRole('heading', { name: 'Analytical Engine Demo' })).toBeVisible()
@@ -57,11 +80,30 @@ test('sign up → post slop → publish → project page shows the receipt', asy
   await expect(page.getByText('$12.50')).toHaveCount(2)
   await expect(page.getByText('Claude Opus 4.6')).toBeVisible()
 
-  // It shows up on home (possibly in several sections) + the profile page.
+  // Not on the public feed yet — pending review stays off the home grid.
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Analytical Engine Demo' })).toHaveCount(0)
+
+  // Approve it from Backstage (the fixed e2e user is an admin).
+  await page.goto('/admin')
+  await expect(page.getByRole('heading', { name: 'Backstage' })).toBeVisible()
+  // exact:true so it doesn't also match the "Approved" filter tab.
+  await page.getByRole('button', { name: 'Approve', exact: true }).click()
+  // Wait for the approval to land: the row drops out of the pending queue.
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0)
+
+  // Now it shows up on home (possibly in several sections) + the profile page.
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Analytical Engine Demo' }).first()).toBeVisible()
   await page.goto('/ada-lovelace')
   await expect(page.getByRole('heading', { name: 'Ada Lovelace' })).toBeVisible()
+
+  // The project page ships a per-page OG title in its SSR HTML (link previews).
+  const ssr = await page.request.get('/ada-lovelace/analytical-engine-demo')
+  expect(ssr.status()).toBe(200)
+  expect(await ssr.text()).toContain(
+    '<meta property="og:title" content="Analytical Engine Demo by @ada-lovelace — slopshow"'
+  )
 
   // Sign out returns to the signed-out state.
   await page.getByRole('button', { name: 'Sign out' }).click()

@@ -10,8 +10,15 @@ import { fmtCount } from '~/lib/fmt'
 import { useTRPC } from '~/lib/trpc'
 import { usePageTitle } from '~/lib/use-page-title'
 
-const IFRAME_SANDBOX =
-  'allow-scripts allow-pointer-lock allow-popups allow-downloads allow-forms allow-modals'
+const IFRAME_SANDBOX = 'allow-scripts allow-pointer-lock allow-forms allow-modals'
+
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return null
+  }
+}
 
 export function ProjectPage() {
   const { username = '', slug = '' } = useParams()
@@ -34,14 +41,15 @@ export function ProjectPage() {
     }
   }, [project?.id])
 
-  const setFeatured = useMutation(
-    trpc.admin.setFeatured.mutationOptions({
-      onSuccess: () =>
-        queryClient.invalidateQueries({
-          queryKey: trpc.projects.get.queryKey({ username, slug }),
-        }),
+  const invalidateProject = () =>
+    queryClient.invalidateQueries({
+      queryKey: trpc.projects.get.queryKey({ username, slug }),
     })
+
+  const setFeatured = useMutation(
+    trpc.admin.setFeatured.mutationOptions({ onSuccess: invalidateProject })
   )
+  const review = useMutation(trpc.admin.review.mutationOptions({ onSuccess: invalidateProject }))
 
   if (query.isLoading) {
     return <p className="label-mono text-muted-foreground mx-auto max-w-6xl px-5 pt-10">Loading…</p>
@@ -58,8 +66,14 @@ export function ProjectPage() {
     )
   }
 
+  // Source priority: an uploaded bundle wins; otherwise an embedded URL; else
+  // it's cover art only. Both playable sources use the identical sandbox.
   const hasBundle = project.bundleVersion > 0
-  const runUrl = `/run/${project.id}/${project.bundleVersion}/`
+  const embedUrl = hasBundle ? null : (project.embedUrl ?? null)
+  const hasEmbed = Boolean(embedUrl)
+  const playable = hasBundle || hasEmbed
+  const playerSrc = hasBundle ? `/run/${project.id}/${project.bundleVersion}/` : (embedUrl ?? '')
+  const embedHost = embedUrl ? hostOf(embedUrl) : null
 
   function copyLink() {
     void navigator.clipboard.writeText(window.location.href).then(() => {
@@ -70,9 +84,20 @@ export function ProjectPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-5 pt-8">
-      {!project.published && (
+      {project.isOwner && !project.published && (
         <div className="border-ink bg-secondary label-mono mb-6 border-2 border-dashed px-4 py-3">
           Draft — only you can see this. Publish it from the editor when it's ready.
+        </div>
+      )}
+      {project.isOwner && project.published && project.moderationStatus === 'pending' && (
+        <div className="border-ink bg-secondary label-mono mb-6 border-2 border-dashed px-4 py-3">
+          In review — an admin is looking it over. It hits the feeds the moment it's approved.
+        </div>
+      )}
+      {project.isOwner && project.moderationStatus === 'rejected' && (
+        <div className="border-ink bg-destructive label-mono mb-6 border-2 px-4 py-3 text-white">
+          Rejected — this stays off the public feeds.
+          {project.reviewNote ? ` Reason: ${project.reviewNote}` : ''}
         </div>
       )}
 
@@ -100,6 +125,32 @@ export function ProjectPage() {
               Edit
             </Link>
           )}
+          {project.isAdmin && project.moderationStatus !== 'approved' && (
+            <Button
+              variant="accent"
+              size="sm"
+              disabled={review.isPending}
+              onClick={() => review.mutate({ id: project.id, decision: 'approved' })}>
+              Approve
+            </Button>
+          )}
+          {project.isAdmin && project.moderationStatus !== 'rejected' && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={review.isPending}
+              onClick={() => {
+                const note = window.prompt('Reject this slop. Reason (optional, shown to builder):')
+                if (note === null) return // cancelled
+                review.mutate({
+                  id: project.id,
+                  decision: 'rejected',
+                  note: note.trim() || undefined,
+                })
+              }}>
+              Reject
+            </Button>
+          )}
           {project.canFeature && (
             <Button
               variant="outline"
@@ -116,9 +167,9 @@ export function ProjectPage() {
         <div className="space-y-8">
           {/* player */}
           <div ref={playerRef} className="border-ink shadow-hard border-2 bg-black">
-            {playing && hasBundle ? (
+            {playing && playable ? (
               <iframe
-                src={runUrl}
+                src={playerSrc}
                 title={project.title}
                 sandbox={IFRAME_SANDBOX}
                 allow="autoplay; gamepad"
@@ -127,7 +178,7 @@ export function ProjectPage() {
             ) : (
               <div className="relative aspect-video w-full">
                 <Cover id={project.id} title={project.title} coverImage={project.coverImage} />
-                {hasBundle && (
+                {playable && (
                   <button
                     type="button"
                     onClick={() => {
@@ -144,8 +195,23 @@ export function ProjectPage() {
             )}
           </div>
 
+          {playing && hasEmbed && embedHost && (
+            <p className="label-mono text-muted-foreground text-xs">
+              Embedded from{' '}
+              <a
+                href={embedUrl ?? undefined}
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => sendHit(project.id, 'click')}
+                className="hover:text-foreground underline underline-offset-4">
+                {embedHost}
+              </a>{' '}
+              — if it stays blank, the site blocks embedding.
+            </p>
+          )}
+
           <div className="label-mono flex flex-wrap items-center gap-x-5 gap-y-2">
-            {playing && hasBundle && (
+            {playing && playable && (
               <button
                 type="button"
                 className="hover:text-muted-foreground cursor-pointer uppercase underline underline-offset-4"

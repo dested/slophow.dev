@@ -43,6 +43,7 @@ type FormState = {
   title: string
   tagline: string
   externalUrl: string
+  embedUrl: string
   description: string
   models: string[]
   tools: string[]
@@ -56,6 +57,7 @@ const EMPTY: FormState = {
   title: '',
   tagline: '',
   externalUrl: '',
+  embedUrl: '',
   description: '',
   models: [],
   tools: [],
@@ -99,6 +101,7 @@ function EditorForm({
     title: string
     tagline: string | null
     externalUrl: string | null
+    embedUrl: string | null
     description: string | null
     models: string[]
     tools: string[]
@@ -110,6 +113,8 @@ function EditorForm({
     bundleVersion: number
     bundleSize: number | null
     published: boolean
+    moderationStatus: string
+    reviewNote: string | null
     owner: { username: string | null }
   } | null
 }) {
@@ -126,6 +131,7 @@ function EditorForm({
           title: project.title,
           tagline: project.tagline ?? '',
           externalUrl: project.externalUrl ?? '',
+          embedUrl: project.embedUrl ?? '',
           description: project.description ?? '',
           models: project.models,
           tools: project.tools,
@@ -150,6 +156,7 @@ function EditorForm({
       tagline: form.tagline,
       description: form.description,
       externalUrl: form.externalUrl,
+      embedUrl: form.embedUrl,
       models: form.models,
       tools: form.tools,
       costUsd: form.costUsd === '' ? null : Number(form.costUsd),
@@ -224,12 +231,32 @@ function EditorForm({
 
       {project && !project.published && (
         <div className="border-ink bg-secondary label-mono border-2 border-dashed px-4 py-3">
-          Draft — hit &ldquo;Publish it&rdquo; when you're ready for an audience.
+          Draft — hit &ldquo;Publish it&rdquo; when you're ready for an audience. Every slop gets a
+          quick once-over from an admin before it goes live.
+        </div>
+      )}
+      {project && project.published && project.moderationStatus === 'pending' && (
+        <div className="border-ink bg-secondary label-mono border-2 border-dashed px-4 py-3">
+          In review — published and waiting on an admin. It hits the feeds the moment it's approved.
+        </div>
+      )}
+      {project && project.moderationStatus === 'rejected' && (
+        <div className="border-ink bg-destructive label-mono border-2 px-4 py-3 text-white">
+          Rejected — kept off the public feeds.
+          {project.reviewNote ? ` Reason: ${project.reviewNote}.` : ''} Fix it up and re-upload to
+          send it back through review.
         </div>
       )}
       {notice && <div className="border-ink bg-acid label-mono border-2 px-4 py-3">{notice}</div>}
 
-      {project && <UploadPanel project={project} onDone={invalidate} />}
+      {project && (
+        <UploadPanel
+          project={project}
+          onDone={invalidate}
+          embedUrl={form.embedUrl}
+          onEmbedChange={(v) => set('embedUrl', v)}
+        />
+      )}
 
       <form onSubmit={onSubmit} className="space-y-10">
         <section className="space-y-5">
@@ -427,6 +454,8 @@ function Field({
 function UploadPanel({
   project,
   onDone,
+  embedUrl,
+  onEmbedChange,
 }: {
   project: {
     id: string
@@ -435,6 +464,8 @@ function UploadPanel({
     coverImage: string | null
   }
   onDone: () => void
+  embedUrl: string
+  onEmbedChange: (value: string) => void
 }) {
   const trpc = useTRPC()
   const [dragging, setDragging] = useState(false)
@@ -525,6 +556,24 @@ function UploadPanel({
             e.target.value = ''
           }}
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="embedUrl" className="label-mono">
+          …or embed a URL
+        </Label>
+        <Input
+          id="embedUrl"
+          type="url"
+          value={embedUrl}
+          onChange={(e) => onEmbedChange(e.target.value)}
+          placeholder="https://your-thing.example.com"
+        />
+        <p className="text-muted-foreground text-xs">
+          Already hosted it somewhere? Paste the URL and it plays in the same frame — no zip needed
+          (a bundle, if you upload one, wins). The site must allow embedding (no X-Frame-Options /
+          frame-ancestors block). Saved when you hit &ldquo;Save changes&rdquo; below.
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-4">
