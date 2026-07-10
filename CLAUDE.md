@@ -159,7 +159,7 @@ It writes to `src/components/ui/`. `components.json` aliases already point at `~
 
 ### Add an e2e test
 
-Specs live in `e2e/*.spec.ts` (Playwright). Tests run against an isolated DB (`tan_starter_test`) on port 3100; `e2e/global-setup.ts` truncates it first so screenshots are deterministic. Add visual coverage with `await expect(page).toHaveScreenshot('name.png')` on a STABLE view (no dynamic dates/ids), then `bun run test:e2e:update` to write the baseline (committed under `e2e/__screenshots__/`). Run with `bun run test:e2e`. Don't screenshot pages with per-run dynamic content unless you mask it.
+Specs live in `e2e/*.spec.ts` (Playwright). Tests run against an isolated DB (`slopshow_test`) on port 3100; `e2e/global-setup.ts` truncates it first so screenshots are deterministic. Add visual coverage with `await expect(page).toHaveScreenshot('name.png')` on a STABLE view (no dynamic dates/ids), then `bun run test:e2e:update` to write the baseline (committed under `e2e/__screenshots__/`). Run with `bun run test:e2e`. Don't screenshot pages with per-run dynamic content unless you mask it.
 
 ## Build / verify
 

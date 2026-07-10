@@ -1,10 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <rect width="32" height="32" rx="7" fill="#0a0a0a" />
-  <path
-    d="M11 9.5h10M16 9.5V23"
-    fill="none"
-    stroke="#fafafa"
-    stroke-width="2.6"
-    stroke-linecap="round"
-  />
+  <rect width="32" height="32" fill="#cfe820" />
+  <rect x="1.5" y="1.5" width="29" height="29" fill="none" stroke="#2b2620" stroke-width="3" />
+  <text x="16" y="24.5" font-family="Arial Black, Arial, sans-serif" font-size="21" font-weight="900" text-anchor="middle" fill="#2b2620">S*</text>
 </svg>

@@ -1,7 +1,11 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
-@custom-variant dark (&:is(.dark *));
+/*
+  slopshow visual language — "the tabloid broadsheet of AI slop".
+  Warm paper, heavy ink, one acid accent. Hard borders + offset block
+  shadows, mono for data, Archivo (wide, black) for shouting. See ui.md.
+*/
 
 @theme inline {
   --color-background: var(--background);
@@ -23,63 +27,156 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-acid: var(--acid);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Spline Sans Mono', ui-monospace, monospace;
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-}
+  --radius: 0rem;
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  /* brand primitives */
+  --paper: oklch(0.967 0.012 90);
+  --ink: oklch(0.245 0.022 65);
+  --acid: oklch(0.888 0.213 122);
+
+  /* shadcn tokens mapped onto the brand */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: oklch(0.988 0.007 90);
+  --card-foreground: var(--ink);
+  --popover: oklch(0.988 0.007 90);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper);
+  --secondary: oklch(0.928 0.015 89);
+  --secondary-foreground: var(--ink);
+  --muted: oklch(0.928 0.015 89);
+  --muted-foreground: oklch(0.49 0.024 70);
+  --accent: oklch(0.928 0.015 89);
+  --accent-foreground: var(--ink);
+  --destructive: oklch(0.6 0.21 32);
+  --destructive-foreground: oklch(0.985 0.005 90);
+  --border: oklch(0.855 0.02 82);
+  --input: oklch(0.855 0.02 82);
+  --ring: var(--ink);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    scrollbar-gutter: stable;
+  }
   body {
     @apply bg-background text-foreground;
-    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-family: var(--font-sans);
+    /* faint halftone dot grid — newsprint texture */
+    background-image: radial-gradient(oklch(0.245 0.022 65 / 0.05) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  ::selection {
+    background: var(--acid);
+    color: var(--ink);
+  }
+}
+
+/* ————— brand utilities ————— */
+
+/* Shouting typeface: Archivo pushed wide + black. */
+@utility font-display {
+  font-family: 'Archivo', ui-sans-serif, sans-serif;
+  font-weight: 900;
+  font-stretch: 118%;
+  letter-spacing: -0.015em;
+  line-height: 0.95;
+}
+
+/* Offset block shadows — the site's elevation system. */
+@utility shadow-hard {
+  box-shadow: 5px 5px 0 0 var(--ink);
+}
+@utility shadow-hard-sm {
+  box-shadow: 3px 3px 0 0 var(--ink);
+}
+@utility shadow-hard-acid {
+  box-shadow: 5px 5px 0 0 var(--acid);
+}
+
+/* Mono eyebrow labels: SECTION HEADERS, receipt lines, stat chips. */
+@utility label-mono {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Marquee ticker (content is rendered twice; this scrolls one copy's width). */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@utility animate-marquee {
+  animation: marquee 28s linear infinite;
+}
+
+/* Receipt bits */
+@utility receipt-rule {
+  border-top: 2px dashed color-mix(in oklab, var(--ink) 35%, transparent);
+}
+@utility barcode {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--ink) 0 2px,
+    transparent 2px 4px,
+    var(--ink) 4px 5px,
+    transparent 5px 9px,
+    var(--ink) 9px 12px,
+    transparent 12px 14px,
+    var(--ink) 14px 15px,
+    transparent 15px 17px
+  );
+}
+/* Zigzag torn-paper edge for the bottom of receipts. */
+@utility tear-edge {
+  height: 10px;
+  background:
+    linear-gradient(-45deg, transparent 7px, var(--card) 0) 0 0 / 14px 100%,
+    linear-gradient(45deg, transparent 7px, var(--card) 0) 7px 0 / 14px 100%;
+  background-repeat: repeat-x;
+}
+
+/* Staggered page-load reveal. Apply .reveal to items; set --i per item. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@utility reveal {
+  animation: rise-in 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee,
+  .reveal {
+    animation: none;
   }
 }

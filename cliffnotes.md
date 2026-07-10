@@ -1,165 +1,192 @@
-# tan-starter — CliffNotes
+# slopshow — CliffNotes
 
 > Living map of the project. Read this before any coding session.
-> Last updated: 2026-06-29. Deep briefing → `CLAUDE.md` · human quickstart → `README.md`.
+> Last updated: 2026-07-10. Visual language → `ui.md` · human quickstart → `README.md`.
 
 ## What this is
 
-An SSR React starter template — clone it, run `bun run init <name>`, and build a real product on top. The whole point is a _minimal but bulletproof_ base: Express 5 + Vite SSR, React Router 7, tRPC, Prisma 7, better-auth, Tailwind v4/shadcn. Keep files minimal; add features, don't gold-plate the scaffolding.
+**slopshow.dev** — a showcase for AI-built creations. Builders get a profile page, upload their
+projects as static zips (served in sandboxed iframes), and every project prints "AI receipts":
+models used, estimated cost, build time, % human-written, and the prompts. Public feeds (featured /
+hot / fresh), per-project stats (views/plays/clicks), admin featuring. Built on the tan-starter
+template: Express 5 + Vite SSR, React Router 7, tRPC v11, Prisma 7, better-auth, Tailwind v4.
 
 ## Quick Reference
 
-- **Dev:** `bun run dev` (http://localhost:3000)
-- **New project:** `bun run init <name>` then `createdb <name>` → `bun run db:push` → `bun run dev`
-- **Entry point:** `server.ts` (Express; same file dev + prod) → SSR via `src/entry-server.tsx`; client hydrates via `src/index.tsx`
+- **Dev:** `bun run dev` (http://localhost:3000 — see the port gotcha below)
 - **Type-check:** `bun run typecheck` (`tsgo --noEmit`)
 - **Build:** `bun run build` → `dist/client` + `dist/server`
-- **Test:** `bun run test:e2e` (Playwright; isolated DB `tan_starter_test` on :3100, committed screenshots)
+- **Test:** `bun run test:e2e` (Playwright; isolated DB `slopshow_test` on :3100; pass
+  `E2E_DATABASE_URL` if your local Postgres creds differ from `postgres:postgres`)
+- **Deploy:** `docker compose up -d --build` (app + Postgres + `uploads` volume) or Render blueprint
 - **Health:** `GET /healthz` (pings the DB)
-- **Day-one fact:** server-only code lives in `./server/` — never import it from `src/*.tsx` except `import type` (it'd ship to the browser / leak secrets).
+- **Day-one facts:** server-only code lives in `./server/` (never import into `src/*` except
+  `import type`); uploaded files live under `DATA_DIR` (`./data`, gitignored).
 
 ## Stack
 
-| Layer             | Choice                          | Notes                                                                                     |
-| ----------------- | ------------------------------- | ----------------------------------------------------------------------------------------- |
-| Runtime / pkg mgr | Bun ≥ 1.3                       | dev + prod                                                                                |
-| Server            | **Express 5** + Vite SSR        | required for `*splat` route wildcards                                                     |
-| Routing           | React Router 7                  | `createBrowserRouter` (client) / `createStaticHandler` (server); explicit `RouteObject[]` |
-| State / data      | TanStack Query + tRPC v11       | `@trpc/tanstack-react-query` (`.queryOptions()`)                                          |
-| API               | tRPC, Express mounts            | `/api/trpc`, `/api/auth/*`, `/healthz`                                                    |
-| Database / ORM    | Postgres + Prisma 7             | `pg` driver adapter (`@prisma/adapter-pg`)                                                |
-| Auth              | better-auth                     | email + password, autoSignIn                                                              |
-| Styling           | Tailwind v4 + shadcn (new-york) | CSS-first, oklch tokens; see `ui.md`                                                      |
-| Tests             | Playwright                      | `e2e/` + committed `__screenshots__` baselines                                            |
-| Deploy            | Render.com blueprint            | `runtime: node` + `BUN_VERSION`                                                           |
+Same as tan-starter (see template docs) plus: `fflate` (zip extraction), GitHub OAuth via
+better-auth `socialProviders` (env-gated), raw-body uploads (no multipart), Docker deploy.
 
 ## Directory structure
 
 ```
-server.ts                Express entry: request logging, /healthz, auth + tRPC mounts,
-                         vite (dev) / static+SSR (prod), startup banner. Dev AND prod.
+server.ts                Express entry. Adds slopshow mounts: /api/upload/bundle,
+                         /api/upload/image, /api/hit (stats beacon), /run/:id/:ver/* (sandboxed
+                         bundle serving), /files/images (covers). Dev AND prod.
 server/
-├── env.ts               zod-validated env, parsed at import (throws → no boot)
-├── logger.ts            ANSI request logger, startup banner, formatError
-├── prisma.ts            PrismaClient singleton (HMR-safe) via pg adapter
-├── auth.ts              better-auth instance + Session type
-├── trpc.ts              createContext + initTRPC + public/protectedProcedure
-└── router.ts            appRouter (me, posts.list, posts.create) + AppRouter type
+├── env.ts               zod env: DATABASE_URL, BETTER_AUTH_*, GITHUB_CLIENT_ID/SECRET (optional),
+│                        ADMIN_EMAILS, DATA_DIR. Exports adminEmails + githubEnabled flags.
+├── auth.ts              better-auth: email/pw + GitHub (when configured); additionalFields
+│                        username/isAdmin on session.user; user-create hook claims a username
+│                        and grants admin from ADMIN_EMAILS.
+├── usernames.ts         RESERVED_USERNAMES (must cover every top-level route!), slugify,
+│                        isValidUsername, generateUsername.
+├── bundles.ts           zip validation/extraction (fflate) to DATA_DIR/bundles/<id>/<ver>/,
+│                        cover image save/delete, resolveBundleFile (traversal-safe serving).
+├── stats.ts             visitorHashFor (sha256 ip|ua|day — rotates daily), recordEvent
+│                        (dedupe + counter bump in one tx), dailySeries (raw SQL group-by).
+├── router.ts            appRouter: config, me, profile.{update,byUsername},
+│                        projects.{home,browse,get,mine,create,update,delete,stats},
+│                        admin.setFeatured. Exports ProjectCard type (card shape on the wire).
+├── trpc.ts              createContext + public/protectedProcedure (unchanged from template)
+├── prisma.ts / logger.ts  unchanged from template
 src/
-├── index.tsx            client entry — hydrateRoot + createBrowserRouter
-├── entry-server.tsx     SSR entry — createStaticHandler.query + renderToString, returns {html,status,dehydratedState}
-├── App.tsx              providers: QueryClientProvider + HydrationBoundary + TRPCProvider
 ├── app/
-│   ├── routes.tsx       RouteObject[] tree + loaders (root/dashboard/redirectIfSignedIn)
-│   ├── layout.tsx       nav + <Outlet/>; sign-out lives here
-│   ├── error-boundary.tsx  root ErrorBoundary → 404 / error UI
-│   ├── home.tsx         /
-│   ├── sign-in.tsx      /sign-in
-│   ├── sign-up.tsx      /sign-up
-│   └── dashboard.tsx    /dashboard (protected; posts list + create form)
-├── components/ui/       shadcn primitives (button, card, input, label)
+│   ├── routes.tsx       Route table + loaders. Fixed routes FIRST, then /:username and
+│   │                    /:username/:slug catch-alls. prefetch() helper SSR-prefetches tRPC.
+│   ├── layout.tsx       nav (wordmark, Browse, Dashboard, +Post slop, @me, Settings) + footer
+│   ├── home.tsx         / — ticker, hero, featured/hot/fresh grids, manifesto strip
+│   ├── browse.tsx       /browse — all published, Newest/Most-gawked toggle
+│   ├── profile.tsx      /:username — accent masthead + collection grid
+│   ├── project.tsx      /:username/:slug — player iframe (RUN IT), receipt, prompts, owner
+│   │                    card, view/play/click beacons, admin feature button
+│   ├── editor.tsx       /new + /:username/:slug/edit — metadata form, zip dropzone, cover
+│   │                    upload, publish/unpublish, delete
+│   ├── dashboard.tsx    /dashboard — project rows + expandable stats (14-day bars, referrers)
+│   ├── settings.tsx     /settings — username/bio/links/accent picker
+│   ├── sign-in.tsx / sign-up.tsx  auth cards + GitHubButton
+│   └── error-boundary.tsx  404 / error page, brand-styled
+├── components/
+│   ├── slop/            brand components: receipt.tsx (THE signature element), project-card.tsx,
+│   │                    cover.tsx (deterministic placeholder art), ticker.tsx, stamp.tsx,
+│   │                    chips-input.tsx, github-button.tsx
+│   └── ui/              shadcn primitives (button restyled for brand, card, input, label, textarea)
 ├── lib/
-│   ├── auth-client.ts   better-auth React client
-│   ├── trpc.tsx         TRPCProvider + useTRPC
-│   └── utils.ts         cn()
-└── styles/app.css       Tailwind v4 import + shadcn oklch tokens
-public/                  favicon.svg, robots.txt (served by vite dev / express static prod)
-e2e/                     smoke.spec.ts, global-setup.ts (truncates test DB), __screenshots__/
-scripts/init.ts          clone→rename initializer
-index.html               SSR template — <!--app-html--> + <!--app-state--> placeholders
-prisma/schema.prisma     User / Session / Account / Verification + Post
-prisma.config.ts         Prisma 7 CLI config; loads .env itself (Bun/Prisma don't)
-render.yaml              Render blueprint (web service + managed Postgres)
+│   ├── api.ts           sendHit beacon + uploadBundle/uploadImage (raw-body fetch)
+│   ├── fmt.ts           fmtCost/fmtHours/fmtCount/fmtBytes/plural/fmtDate + ACCENTS presets
+│   └── use-page-title.ts  document.title per page
+prisma/schema.prisma     User(+profile fields) / Session / Account / Verification / Project /
+                         StatEvent
+Dockerfile + docker-compose.yml   VPS deploy (app + postgres + uploads volume)
+e2e/smoke.spec.ts        signed-out pages + full sign-up→post→publish→receipt flow
+data/                    (gitignored) DATA_DIR: bundles/<projectId>/<version>/, images/
 ```
 
 ## File map (concept → path)
 
-| Concept / task                    | Location                                                      |
-| --------------------------------- | ------------------------------------------------------------- |
-| App providers                     | `src/App.tsx`                                                 |
-| Routing + loaders                 | `src/app/routes.tsx`                                          |
-| New page component                | `src/app/<name>.tsx`                                          |
-| 404 / error UI                    | `src/app/error-boundary.tsx`                                  |
-| tRPC procedures                   | `server/router.ts`                                            |
-| tRPC context / procedure builders | `server/trpc.ts`                                              |
-| DB schema                         | `prisma/schema.prisma`                                        |
-| Auth config                       | `server/auth.ts` (server) · `src/lib/auth-client.ts` (client) |
-| HTTP mounts / SSR / 404 logic     | `server.ts`                                                   |
-| Logging                           | `server/logger.ts`                                            |
-| Env vars                          | `server/env.ts` + `.env.example` + `render.yaml`              |
-| Design tokens                     | `src/styles/app.css` (see `ui.md`)                            |
-| E2E tests                         | `e2e/*.spec.ts`                                               |
+| Concept / task                  | Location                                                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Add a page / route              | `src/app/<name>.tsx` + `src/app/routes.tsx` (BEFORE the :username catch-alls; add the path to `RESERVED_USERNAMES`) |
+| tRPC procedures                 | `server/router.ts`                                                                                                  |
+| Upload / zip handling           | `server/bundles.ts` + mounts in `server.ts`                                                                         |
+| Stats recording / queries       | `server/stats.ts` + `/api/hit` in `server.ts`                                                                       |
+| Receipt / card look             | `src/components/slop/receipt.tsx`, `project-card.tsx`                                                               |
+| Auth config / username claiming | `server/auth.ts`, `server/usernames.ts`                                                                             |
+| Design tokens / brand utilities | `src/styles/app.css` (see `ui.md`)                                                                                  |
+| Env vars                        | `server/env.ts` + `.env.example` + `docker-compose.yml`                                                             |
 
 ## Routes / URLs
 
-Routes are explicit in `src/app/routes.tsx` (no file-based routing). All page routes nest under the root `Layout`.
-
-| Route         | Serves                | File                             | Loader                                   |
-| ------------- | --------------------- | -------------------------------- | ---------------------------------------- |
-| `/`           | Landing               | `src/app/home.tsx`               | `rootLoader` (session)                   |
-| `/sign-in`    | Sign in               | `src/app/sign-in.tsx`            | `redirectIfSignedIn`                     |
-| `/sign-up`    | Sign up               | `src/app/sign-up.tsx`            | `redirectIfSignedIn`                     |
-| `/dashboard`  | Protected app         | `src/app/dashboard.tsx`          | `dashboardLoader` (redirects + prefetch) |
-| `/healthz`    | DB health JSON        | `server.ts`                      | —                                        |
-| `/api/auth/*` | better-auth           | `server.ts` (`toNodeHandler`)    | —                                        |
-| `/api/trpc/*` | tRPC                  | `server.ts` → `server/router.ts` | —                                        |
-| unmatched GET | 404 page (status 404) | `error-boundary.tsx`             | —                                        |
-
-## Architecture
-
-Browser ↔ Express 5 (`server.ts`) ↔ Postgres. One Express server runs in dev (Vite middleware + `ssrLoadModule`) and prod (static `dist/client` + built `dist/server/entry-server.js`), gated on `NODE_ENV`. SSR: `render(req)` builds a Fetch Request, runs `createStaticHandler(routes).query()` to execute loaders (session + tRPC prefetch happen here), `renderToString`s with `<StaticRouterProvider>`, and dehydrates the QueryClient into `window.__SSR_STATE__`. The client rehydrates that cache, so `useQuery` has data on first paint. The SSR-side tRPC options proxy calls procedures **directly** (no HTTP).
-
-## Data model
-
-`prisma/schema.prisma` — better-auth's required models (`User`, `Session`, `Account`, `Verification`) mapped to lowercase tables via `@@map`; fields are camelCase (better-auth queries by name) with snake_case `@map` columns. App model: `Post` (id, title, content, `authorId` → User `onDelete: Cascade`, createdAt). FK relations to `User` should cascade.
+| Route                                  | Serves                               | File                       |
+| -------------------------------------- | ------------------------------------ | -------------------------- |
+| `/`                                    | Landing: featured/hot/fresh          | `src/app/home.tsx`         |
+| `/browse`                              | All published projects               | `src/app/browse.tsx`       |
+| `/new`                                 | Create draft (protected)             | `src/app/editor.tsx`       |
+| `/dashboard`                           | Your projects + stats (protected)    | `src/app/dashboard.tsx`    |
+| `/settings`                            | Profile customization (protected)    | `src/app/settings.tsx`     |
+| `/sign-in` · `/sign-up`                | Auth                                 | `src/app/sign-{in,up}.tsx` |
+| `/:username`                           | Builder profile                      | `src/app/profile.tsx`      |
+| `/:username/:slug`                     | Project page (player + receipt)      | `src/app/project.tsx`      |
+| `/:username/:slug/edit`                | Editor (owner)                       | `src/app/editor.tsx`       |
+| `/run/:projectId/:ver/*`               | Sandboxed bundle files (CSP sandbox) | `server.ts`                |
+| `/files/images/*`                      | Cover images (static)                | `server.ts`                |
+| `/api/upload/bundle`                   | POST raw zip (?projectId=)           | `server.ts`                |
+| `/api/upload/image`                    | POST raw image                       | `server.ts`                |
+| `/api/hit`                             | POST stats beacon {projectId, kind}  | `server.ts`                |
+| `/api/auth/*` `/api/trpc/*` `/healthz` | template mounts                      | `server.ts`                |
 
 ## Systems
 
-### Auth (better-auth)
+### Hosted bundles (the core feature)
 
-Email + password, `autoSignIn` on sign-up. Client (`auth-client.ts`) → `/api/auth/*` (`toNodeHandler`, mounted before `express.json`). SSR reads the session once per request; loaders get it via `requestContext`; the root loader returns `{ session }`, read with `useRouteLoaderData('root')`. **Lives in:** `server/auth.ts`, `src/lib/auth-client.ts`, `src/app/{sign-in,sign-up,layout}.tsx`. Sign-in/up/out all call `revalidator.revalidate()` so the nav reflects the new session.
+Upload: client POSTs the zip bytes raw (`src/lib/api.ts`) → `extractBundle` validates (no `..`/
+absolute/drive paths, ≤2000 files, ≤200MB uncompressed, must contain `index.html`; a single
+wrapping folder is auto-stripped) → files land in `DATA_DIR/bundles/<projectId>/<version>/`;
+version bumps on each upload and old versions are deleted. Serving: `/run/:id/:version/*` sends
+files with `Content-Security-Policy: sandbox allow-scripts ...` and **no allow-same-origin** —
+the bundle gets an opaque origin whether iframed or opened directly, so uploaded JS can't touch
+slopshow cookies/storage. The iframe in `project.tsx` sets the same sandbox attribute. The version
+in the URL makes aggressive caching safe.
 
-### tRPC
+### Stats
 
-`publicProcedure` / `protectedProcedure` (401 without session). Context attaches the session from request headers. **Lives in:** `server/trpc.ts`, `server/router.ts`, `src/lib/trpc.tsx`.
+Client beacons (`sendHit`): `view` on project-page mount, `play` on RUN IT, `click` on external
+link. Server (`recordEvent`): drops bots, hashes visitor (ip|ua|day|secret — rotates daily, no raw
+IPs stored), dedupes per project+kind+visitor, and increments the project's denormalized counter in
+the same transaction (so feeds sort without aggregating). Unpublished projects record nothing.
+Dashboard reads `projects.stats`: totals + 14-day daily series + top referrers.
 
-### Logging & errors
+### Usernames & profiles
 
-Dependency-free ANSI logger: one line per request (method · status · path · timing), startup banner, `formatError`. Loader/render errors and unmatched routes render the root `ErrorBoundary`. **Lives in:** `server/logger.ts`, `src/app/error-boundary.tsx`.
+Claimed automatically on signup (slugified name/email, deduped) via better-auth's user-create hook;
+editable in `/settings`. `RESERVED_USERNAMES` in `server/usernames.ts` must contain every top-level
+path — `/:username` is a catch-all. Profile accent (masthead color) comes from `ACCENTS` presets in
+`src/lib/fmt.ts`.
 
-## Common tasks (how to modify)
+### Featuring / admin
 
-### Add a route
+`User.isAdmin` (granted at signup when email ∈ `ADMIN_EMAILS`) shows a Feature/Unfeature button on
+project pages → `admin.setFeatured` → home's featured shelf (ordered by `featuredAt`).
 
-1. Create `src/app/<name>.tsx` exporting `<NamePage>`.
-2. Add `{ path: '<name>', Component: NamePage }` to `routes.tsx` (add a `loader` for auth/data).
+## Data model
 
-### Add a tRPC procedure
-
-Add to `appRouter` in `server/router.ts`; pick public/protected; validate input with zod; return JSON-safe data (dates → ISO strings).
-
-### Add a DB table
-
-Edit `prisma/schema.prisma` → `bun run db:push` → `bun run db:generate` → use `prisma.x` in procedures.
-
-### Add an e2e test
-
-Add `e2e/*.spec.ts`; screenshot only stable views; `bun run test:e2e:update` to write baselines.
+Template auth models plus: `User` profile fields (username unique, bio, website, githubHandle,
+twitterHandle, accent, isAdmin) · `Project` (slug unique per owner, title/tagline/description,
+coverImage, externalUrl, published/featured, receipts: models[]/tools[]/costUsd/buildHours/
+humanPercent/promptNotes, bundleVersion/bundleSize, denormalized view/play/clickCount) ·
+`StatEvent` (projectId, kind, visitorHash, referrer). Projects are created as drafts
+(`published: false`) and go live via the editor's Publish button.
 
 ## Gotchas & hard rules
 
-- **Path alias `~/*` → `src/*`** (client only); server uses relative imports.
-- **`./server/*` is server-only** — import into `src/*` only as `import type`.
-- **Express 5 required** — `*splat` wildcards break on Express 4 (symptom: `/api/auth/*` 404s, auth dead).
-- **`.env` loading**: Bun loads `.env` only into its own runtime, not the Prisma CLI (Node subprocess); Prisma 7 dropped auto-loading — `prisma.config.ts` loads it manually. Keep that block.
-- **Run `bun run db:generate` after schema edits** (auto-runs on `bun install`).
-- **JSON-safe tRPC returns** — convert `Date` → ISO string at the procedure, or SSR/hydration markup diverges.
-- **shadcn has no `asChild`** (no `@radix-ui/react-slot`) — style a `Link` with `buttonVariants()`.
-- **No `tailwind.config`** — Tailwind v4, tokens in `app.css`.
-- Use `log.*` from `server/logger.ts`, not raw `console.log`, in server code.
+- All template gotchas still apply (`~/*` alias, server-only imports, Express 5, `.env` loading,
+  `db:generate` after schema edits, JSON-safe tRPC returns, no `asChild`, Tailwind v4 tokens).
+- **New fixed route? Reserve the name** in `server/usernames.ts` or a user can squat it and the
+  route table will shadow their profile anyway (fixed routes match first).
+- **Never add `allow-same-origin`** to the bundle iframe sandbox or the `/run` CSP header —
+  that's the entire security model for hosting arbitrary uploaded HTML/JS.
+- **Windows dev: port 3000 may be double-bound.** Windows lets two processes listen on 3000
+  without an error; if another dev server is running, requests race. Run
+  `PORT=3005 BETTER_AUTH_URL=http://localhost:3005 bun run dev` when in doubt.
+- Local Postgres on this machine uses password `<redacted>` (see `.env`); e2e needs
+  `E2E_DATABASE_URL=postgres://postgres:<redacted>@localhost:5432/slopshow_test`.
+- Playwright screenshots pass `animations: 'disabled'` — the marquee/reveal animations are
+  otherwise flaky in pixel diffs.
+- Uploads are raw-body POSTs (`express.raw`), NOT multipart — keep client and server in sync.
+- Receipt numeric fields (`costUsd`, `buildHours`, `humanPercent`) are nullable — "not reported"
+  is a meaningful state the receipt renders differently.
 
 ## Status
 
-- **Done** — SSR + hydration, auth (email/pw), tRPC posts demo, logging, /healthz, 404/error handling, favicon/robots, init script, Playwright e2e + screenshot baselines, Render blueprint. Express 5 + Prisma 7.
-- **Not built** — email verification, OAuth providers, rate limiting, migrations workflow (uses `db push`), CI, dark-mode toggle (tokens exist, unused).
-- **Next:** whatever the cloned product needs — this is a base.
+- **Done** — full product: auth (email + optional GitHub), auto-claimed usernames, project CRUD
+  with drafts, zip upload → sandboxed hosting, cover images, receipts, profiles with accent
+  customization, home/browse feeds, stats (beacons, dedupe, dashboard chart, referrers), admin
+  featuring, brand design system, e2e suite (4 passing), Docker deploy files. Verified end-to-end
+  in a real browser 2026-07-10.
+- **Not built** — SSR per-page OG meta tags (client-side titles only — matters for link previews,
+  do before HN launch if possible), pagination on browse (takes 60), email verification, rate
+  limiting on uploads/hits, S3-compatible storage driver (local disk only), likes/comments,
+  GitHub OAuth app creds (env is wired, user must create the app).
+- **Next:** deploy to the VPS behind the slopshow.dev domain; create the GitHub OAuth app; seed a
+  few real projects before launch.

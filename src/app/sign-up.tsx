@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Link, useNavigate, useRevalidator } from 'react-router-dom'
-import { authClient } from '~/lib/auth-client'
+import { GitHubButton } from '~/components/slop/github-button'
 import { Button } from '~/components/ui/button'
 import { Input } from '~/components/ui/input'
 import { Label } from '~/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '~/components/ui/card'
+import { authClient } from '~/lib/auth-client'
+import { usePageTitle } from '~/lib/use-page-title'
 
 export function SignUpPage() {
+  usePageTitle('Join the show')
   const navigate = useNavigate()
   const revalidator = useRevalidator()
   const [name, setName] = useState('')
@@ -26,30 +28,36 @@ export function SignUpPage() {
       return
     }
     revalidator.revalidate()
-    navigate('/dashboard')
+    navigate('/settings')
   }
 
   return (
-    <div className="mx-auto max-w-sm">
-      <Card>
-        <CardHeader>
-          <CardTitle>Create account</CardTitle>
-          <CardDescription>Sign up with your email and a password.</CardDescription>
-        </CardHeader>
-        <CardContent>
+    <div className="mx-auto max-w-sm px-5 pt-14">
+      <div className="border-ink bg-card shadow-hard border-2 p-6">
+        <h1 className="font-display text-3xl uppercase">Join the show</h1>
+        <p className="text-muted-foreground mt-1 mb-6 text-sm">
+          Get a page, post your slop, keep the receipts.
+        </p>
+        <div className="space-y-4">
+          <GitHubButton />
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
+              <Label htmlFor="name" className="label-mono">
+                Name
+              </Label>
               <Input
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
                 autoComplete="name"
+                placeholder="What the marquee should say"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email" className="label-mono">
+                Email
+              </Label>
               <Input
                 id="email"
                 type="email"
@@ -60,7 +68,9 @@ export function SignUpPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className="label-mono">
+                Password
+              </Label>
               <Input
                 id="password"
                 type="password"
@@ -72,18 +82,18 @@ export function SignUpPage() {
               />
             </div>
             {error && <p className="text-destructive text-sm">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" variant="accent" className="w-full" disabled={loading}>
               {loading ? 'Creating account…' : 'Sign up'}
             </Button>
             <p className="text-muted-foreground text-center text-sm">
-              Already have an account?{' '}
-              <Link to="/sign-in" className="underline">
+              Already in?{' '}
+              <Link to="/sign-in" className="underline underline-offset-4">
                 Sign in
               </Link>
             </p>
           </form>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   )
 }

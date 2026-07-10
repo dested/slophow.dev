@@ -9,9 +9,9 @@ export function RouteErrorBoundary() {
   const error = useRouteError()
   const isNotFound = isRouteErrorResponse(error) && error.status === 404
 
-  const title = isNotFound ? '404' : 'Something went wrong'
+  const title = isNotFound ? '404' : 'It broke'
   const message = isNotFound
-    ? "This page doesn't exist."
+    ? 'This page never existed, or it got swept off stage.'
     : isRouteErrorResponse(error)
       ? `${error.status} ${error.statusText}`
       : error instanceof Error
@@ -20,23 +20,23 @@ export function RouteErrorBoundary() {
 
   return (
     <>
-      <header className="border-b">
-        <nav className="mx-auto flex max-w-5xl items-center px-6 py-4">
-          <Link to="/" className="font-semibold">
-            tan-starter
+      <header className="border-ink border-b-2">
+        <nav className="mx-auto flex max-w-6xl items-center px-5 py-3.5">
+          <Link to="/" className="font-display text-xl uppercase">
+            slopshow<span style={{ color: 'oklch(0.68 0.2 122)' }}>*</span>
           </Link>
         </nav>
       </header>
-      <main className="mx-auto flex max-w-5xl flex-col items-start gap-4 px-6 py-16">
-        <h1 className="text-5xl font-bold tracking-tight">{title}</h1>
+      <main className="mx-auto flex max-w-6xl flex-col items-start gap-4 px-5 py-16">
+        <h1 className="font-display text-7xl uppercase">{title}</h1>
         <p className="text-muted-foreground">{message}</p>
         {import.meta.env.DEV && error instanceof Error && error.stack && (
-          <pre className="bg-muted text-muted-foreground max-w-full overflow-auto rounded-md p-4 text-xs">
+          <pre className="border-ink bg-secondary max-w-full overflow-auto border-2 border-dashed p-4 font-mono text-xs">
             {error.stack}
           </pre>
         )}
-        <Link to="/" className={buttonVariants()}>
-          Back home
+        <Link to="/" className={buttonVariants({ variant: 'accent' })}>
+          Back to the show
         </Link>
       </main>
     </>

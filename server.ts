@@ -5,11 +5,20 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { auth } from './server/auth'
+import {
+  ensureDataDirs,
+  extractBundle,
+  imagesDir,
+  resolveBundleFile,
+  saveImage,
+  UploadError,
+} from './server/bundles'
 import { env } from './server/env'
 import { formatError, log, requestLogger, startupBanner } from './server/logger'
 import { prisma } from './server/prisma'
 import { appRouter } from './server/router'
 import { createContext } from './server/trpc'
+import { recordEvent, STAT_KINDS, type StatKind } from './server/stats'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isProd = process.env.NODE_ENV === 'production'
@@ -43,6 +52,117 @@ async function createServer() {
   // better-auth handler — mounted BEFORE express.json() (better-auth reads
   // the raw body itself).
   app.all('/api/auth/*splat', toNodeHandler(auth))
+
+  // ————— slopshow: uploads, stats beacon, hosted bundles —————
+
+  ensureDataDirs()
+  // Real client IPs for visitor hashing when behind a reverse proxy.
+  app.set('trust proxy', 1)
+
+  const sessionFromReq = async (req: express.Request) => {
+    const headers = new Headers()
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (typeof value === 'string') headers.set(key, value)
+    }
+    return auth.api.getSession({ headers })
+  }
+
+  // Zip upload → extracted bundle. Raw body (not multipart): the client POSTs
+  // the file bytes directly with the project id in the query string.
+  app.post(
+    '/api/upload/bundle',
+    express.raw({ type: () => true, limit: '100mb' }),
+    async (req, res) => {
+      try {
+        const session = await sessionFromReq(req)
+        if (!session) return void res.status(401).json({ error: 'Sign in first.' })
+        const projectId = String(req.query.projectId ?? '')
+        const project = await prisma.project.findUnique({ where: { id: projectId } })
+        if (!project || project.ownerId !== session.user.id) {
+          return void res.status(404).json({ error: 'Project not found.' })
+        }
+        if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+          return void res.status(400).json({ error: 'Empty upload.' })
+        }
+        const version = project.bundleVersion + 1
+        const { size, fileCount } = extractBundle(project.id, version, req.body)
+        await prisma.project.update({
+          where: { id: project.id },
+          data: { bundleVersion: version, bundleSize: size },
+        })
+        res.json({ version, size, fileCount })
+      } catch (e) {
+        if (e instanceof UploadError) return void res.status(400).json({ error: e.message })
+        log.error(`bundle upload failed: ${formatError(e)}`)
+        res.status(500).json({ error: 'Upload failed.' })
+      }
+    }
+  )
+
+  // Cover image upload — returns the stored filename; the client attaches it
+  // to a project via projects.update.
+  app.post(
+    '/api/upload/image',
+    express.raw({ type: 'image/*', limit: '8mb' }),
+    async (req, res) => {
+      try {
+        const session = await sessionFromReq(req)
+        if (!session) return void res.status(401).json({ error: 'Sign in first.' })
+        if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+          return void res.status(400).json({ error: 'Empty upload.' })
+        }
+        const name = saveImage(req.headers['content-type'] ?? '', req.body)
+        res.json({ name })
+      } catch (e) {
+        if (e instanceof UploadError) return void res.status(400).json({ error: e.message })
+        log.error(`image upload failed: ${formatError(e)}`)
+        res.status(500).json({ error: 'Upload failed.' })
+      }
+    }
+  )
+
+  // Stats beacon: {projectId, kind: view|play|click}. Deduped per visitor per
+  // day server-side; always 204 so the client never cares.
+  app.post('/api/hit', express.json({ limit: '2kb' }), async (req, res) => {
+    res.status(204).end()
+    try {
+      const { projectId, kind } = req.body ?? {}
+      if (typeof projectId !== 'string' || !STAT_KINDS.includes(kind)) return
+      const project = await prisma.project.findUnique({
+        where: { id: projectId },
+        select: { published: true },
+      })
+      if (!project?.published) return
+      await recordEvent(projectId, kind as StatKind, req)
+    } catch (e) {
+      log.error(`stat hit failed: ${formatError(e)}`)
+    }
+  })
+
+  // Hosted bundles. The CSP sandbox (deliberately NO allow-same-origin) gives
+  // every bundle an opaque origin — uploaded HTML/JS can run but can't touch
+  // slopshow cookies or storage, embedded or opened directly.
+  const RUN_HEADERS = {
+    'Content-Security-Policy':
+      'sandbox allow-scripts allow-pointer-lock allow-popups allow-downloads allow-forms allow-modals',
+    'X-Content-Type-Options': 'nosniff',
+    // The version is in the URL, so aggressive caching is safe.
+    'Cache-Control': 'public, max-age=31536000, immutable',
+  }
+  app.get('/run/:projectId/:version{/*splat}', (req, res) => {
+    const { projectId, version } = req.params as { projectId: string; version: string }
+    const splat = (req.params as Record<string, unknown>).splat
+    const rel = Array.isArray(splat) ? splat.join('/') : typeof splat === 'string' ? splat : ''
+    const file = resolveBundleFile(projectId, version, rel)
+    if (!file) return void res.status(404).type('txt').end('Not found')
+    res.sendFile(file, { headers: RUN_HEADERS, dotfiles: 'deny' })
+  })
+
+  // Uploaded cover images.
+  app.use(
+    '/files/images',
+    express.static(imagesDir, { immutable: true, maxAge: '30d', index: false })
+  )
 
   app.use(
     '/api/trpc',
@@ -141,7 +261,17 @@ async function createServer() {
       port: PORT,
       isProd,
       databaseUrl: env.DATABASE_URL,
-      routes: ['/', '/sign-in', '/sign-up', '/dashboard', '/healthz', '/api/trpc', '/api/auth'],
+      routes: [
+        '/',
+        '/browse',
+        '/new',
+        '/dashboard',
+        '/settings',
+        '/healthz',
+        '/api/trpc',
+        '/api/auth',
+        '/run',
+      ],
     })
   })
 }

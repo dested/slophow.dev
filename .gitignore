@@ -3,6 +3,9 @@ dist
 .vite
 .cache
 
+# uploaded bundles + images (DATA_DIR)
+data
+
 # env
 .env
 .env.*

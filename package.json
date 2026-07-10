@@ -1,5 +1,5 @@
 {
-  "name": "tan-starter",
+  "name": "slopshow",
   "private": true,
   "type": "module",
   "sideEffects": false,
@@ -37,6 +37,7 @@
     "compression": "^1.7.5",
     "cross-env": "^7.0.3",
     "express": "^5",
+    "fflate": "^0.8.3",
     "lucide-react": "^0.468.0",
     "pg": "^8.20.0",
     "prettier": "^3.8.3",

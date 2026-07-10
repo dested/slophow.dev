@@ -1,9 +1,8 @@
 // Prisma schema — https://pris.ly/d/prisma-schema
 //
-// Models match better-auth's required shape (user / session / account /
+// Auth models match better-auth's required shape (user / session / account /
 // verification). Field names are camelCase (better-auth queries them by name);
-// columns are snake_case via `@map` to match the prior Drizzle layout, so an
-// existing dev database keeps working unchanged.
+// columns are snake_case via `@map`.
 
 generator client {
   provider = "prisma-client-js"
@@ -22,9 +21,19 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @default(now()) @map("updated_at")
 
+  // slopshow profile — username is claimed automatically on signup (from the
+  // display name / email local part) and editable in /settings.
+  username      String?  @unique
+  bio           String?
+  website       String?
+  githubHandle  String?  @map("github_handle")
+  twitterHandle String?  @map("twitter_handle")
+  accent        String?  // preset accent key for the profile page (see ui.md)
+  isAdmin       Boolean  @default(false) @map("is_admin")
+
   sessions Session[]
   accounts Account[]
-  posts    Post[]
+  projects Project[]
 
   @@map("user")
 }
@@ -73,13 +82,69 @@ model Verification {
   @@map("verification")
 }
 
-model Post {
-  id        String   @id @default(uuid())
-  title     String
-  content   String
-  authorId  String   @map("author_id")
-  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+// A creation someone is showing off. The "AI receipts" fields (models, cost,
+// build time, human%) are the point of the site — all optional, all
+// self-reported.
+model Project {
+  id      String @id @default(uuid())
+  slug    String
+  ownerId String @map("owner_id")
+  owner   User   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  title       String
+  tagline     String? // one-liner shown on cards
+  description String? // longer "how I built it" text (plain text w/ paragraphs)
+  coverImage  String? @map("cover_image") // filename under DATA_DIR/images
+  externalUrl String? @map("external_url") // optional "also live at" link
+
+  published  Boolean   @default(true)
+  featured   Boolean   @default(false)
+  featuredAt DateTime? @map("featured_at")
+
+  // AI receipts
+  models       String[] @default([]) // e.g. ["Claude Opus 4.6"]
+  tools        String[] @default([]) // e.g. ["Claude Code", "Cursor"]
+  costUsd      Float?   @map("cost_usd") // self-estimated spend
+  buildHours   Float?   @map("build_hours") // wall-clock time to build
+  humanPercent Int?     @map("human_percent") // % of code written by hand, 0–100
+  promptNotes  String?  @map("prompt_notes") // notable prompts / prompting approach
+
+  // Hosted bundle: files live at DATA_DIR/bundles/<id>/<version>/ with an
+  // index.html entry. version 0 = nothing uploaded yet; bumped on re-upload.
+  bundleVersion Int  @default(0) @map("bundle_version")
+  bundleSize    Int? @map("bundle_size") // uncompressed bytes
+
+  // Denormalized counters (kept in sync when a StatEvent is recorded) so
+  // browse/featured sorting never aggregates the events table.
+  viewCount  Int @default(0) @map("view_count")
+  playCount  Int @default(0) @map("play_count")
+  clickCount Int @default(0) @map("click_count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  events StatEvent[]
+
+  @@unique([ownerId, slug])
+  @@index([featured, featuredAt])
+  @@index([published, createdAt])
+  @@map("project")
+}
+
+// One row per counted interaction. visitorHash = sha256(ip|ua|day) — a view
+// is counted at most once per visitor per project per day.
+model StatEvent {
+  id        String  @id @default(uuid())
+  projectId String  @map("project_id")
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  kind        String // 'view' | 'play' | 'click'
+  visitorHash String  @map("visitor_hash")
+  referrer    String?
+
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@map("post")
+  @@index([projectId, kind, createdAt])
+  @@index([projectId, visitorHash, kind])
+  @@map("stat_event")
 }

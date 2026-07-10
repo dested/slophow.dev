@@ -1,6 +1,6 @@
-# Upgrading an existing tan-starter clone
+# Upgrading an existing slopshow clone
 
-This repo (a project cloned from **tan-starter**) predates a round of bug fixes and
+This repo (a project cloned from **slopshow**) predates a round of bug fixes and
 hardening in the template. This doc brings it up to date.
 
 Some of these are **correctness bugs that break the app** (auth returns 404, the
@@ -22,11 +22,11 @@ it matches, apply the **Fix**; then run **Verify**. Do them in order.
 
 > ⚠️ Your project was likely renamed (via `bun run init` or by hand). The Detect
 > commands below are name-agnostic. The new _files_ you copy from upstream still
-> say `tan-starter`/`tan_starter`/`Tan Starter` — search-and-replace those to your
+> say `slopshow`/`slopshow`/`Slopshow` — search-and-replace those to your
 > project's name after copying (the same three tokens `bun run init` rewrites).
 
-**Upstream** = a fresh clone of the latest tan-starter. Keep one handy to copy new
-files from (`git clone <tan-starter-url> /tmp/tan-starter-upstream`).
+**Upstream** = a fresh clone of the latest slopshow. Keep one handy to copy new
+files from (`git clone <slopshow-url> /tmp/slopshow-upstream`).
 
 ---
 
