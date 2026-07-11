@@ -13,7 +13,9 @@ template: Express 5 + Vite SSR, React Router 7, tRPC v11, Prisma 7, better-auth,
 
 ## Quick Reference
 
-- **Dev:** `bun run dev` (http://localhost:3000 — see the port gotcha below)
+- **Dev:** `bun run dev` — served through **portless** at `https://slopshow.localhost` (named
+  `.localhost` URL, HTTPS, no port juggling; portless assigns a random `PORT` to the server and
+  sets `BETTER_AUTH_URL` to match). Raw port fallback: `bun run dev:raw` (`http://localhost:3000`).
 - **Type-check:** `bun run typecheck` (`tsgo --noEmit`)
 - **Build:** `bun run build` → `dist/client` + `dist/server`
 - **Test:** `bun run test:e2e` (Playwright; isolated DB `slopshow_test` on :3100; pass
@@ -226,9 +228,12 @@ pending`); the owner's Publish button submits them to the admin review queue, no
   route table will shadow their profile anyway (fixed routes match first).
 - **Never add `allow-same-origin`** to the bundle iframe sandbox or the `/run` CSP header —
   that's the entire security model for hosting arbitrary uploaded HTML/JS.
-- **Windows dev: port 3000 may be double-bound.** Windows lets two processes listen on 3000
-  without an error; if another dev server is running, requests race. Run
-  `PORT=3005 BETTER_AUTH_URL=http://localhost:3005 bun run dev` when in doubt.
+- **Windows dev: port 3000 may be double-bound** (only relevant to `dev:raw`). Windows lets two
+  processes listen on 3000 without an error; if another dev server is running, requests race. The
+  default `bun run dev` sidesteps this — portless assigns a random `PORT` (4000–4999) and fronts it
+  at `https://slopshow.localhost`. For raw mode, run `PORT=3005 BETTER_AUTH_URL=http://localhost:3005
+  bun run dev:raw` when in doubt. (portless config: `portless.json`; binds :443 for HTTPS and trusts
+  a local CA at `~/.portless/ca.pem` on first run.)
 - Local Postgres credentials live in the gitignored `.env` (never commit them). e2e needs
   `E2E_DATABASE_URL` pointing at your test DB, e.g.
   `E2E_DATABASE_URL=postgres://postgres:<your-password>@localhost:5432/slopshow_test`.
