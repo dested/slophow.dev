@@ -32,7 +32,7 @@ export function Receipt({
       <div className="border-ink bg-card border-2 border-b-0 px-5 pt-5 pb-6 font-mono text-[0.8rem] leading-relaxed">
         <p className="text-center text-base font-bold tracking-[0.2em]">SLOPSHOW</p>
         <p className="text-muted-foreground text-center text-[0.65rem] tracking-[0.14em]">
-          ★ OFFICIAL AI RECEIPT ★
+          ★ AI RECEIPT ★
         </p>
 
         <div className="receipt-rule my-3" />
