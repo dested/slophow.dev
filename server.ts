@@ -9,6 +9,8 @@ import {
   ensureDataDirs,
   extractBundle,
   imagesDir,
+  renderBundleCss,
+  renderBundleHtml,
   resolveBundleFile,
   saveImage,
   UploadError,
@@ -168,16 +170,39 @@ async function createServer() {
   const RUN_HEADERS = {
     'Content-Security-Policy': 'sandbox allow-scripts allow-pointer-lock allow-forms allow-modals',
     'X-Content-Type-Options': 'nosniff',
-    // The version is in the URL, so aggressive caching is safe.
-    'Cache-Control': 'public, max-age=31536000, immutable',
+    // The bundle runs in an opaque-origin sandbox (null origin). Module scripts
+    // and crossorigin stylesheets/fonts are fetched in CORS mode from that null
+    // origin, so the browser blocks them without an allow header. The content is
+    // public and served without credentials, so "*" is safe here.
+    'Access-Control-Allow-Origin': '*',
   }
+  // Assets carry the version in their URL, so cache them hard. HTML/CSS are
+  // rewritten on the fly (absolute-path fixup, see renderBundleHtml), so let the
+  // browser revalidate in case we improve the rewriter.
+  const ASSET_CACHE = 'public, max-age=31536000, immutable'
+  const REWRITTEN_CACHE = 'public, max-age=0, must-revalidate'
   app.get('/run/:projectId/:version{/*splat}', (req, res) => {
     const { projectId, version } = req.params as { projectId: string; version: string }
     const splat = (req.params as Record<string, unknown>).splat
     const rel = Array.isArray(splat) ? splat.join('/') : typeof splat === 'string' ? splat : ''
     const file = resolveBundleFile(projectId, version, rel)
     if (!file) return void res.status(404).type('txt').end('Not found')
-    res.sendFile(file, { headers: RUN_HEADERS, dotfiles: 'deny' })
+    // Rewrite entrypoint HTML and CSS so absolute paths resolve under the
+    // bundle's subpath instead of the site root; other files stream as-is.
+    const isHtml = /\.html?$/i.test(file)
+    const isCss = /\.css$/i.test(file)
+    if (isHtml || isCss) {
+      const base = `/run/${projectId}/${version}`
+      const body = isHtml ? renderBundleHtml(file, base) : renderBundleCss(file, base)
+      res.set(RUN_HEADERS)
+      res.set('Cache-Control', REWRITTEN_CACHE)
+      res.type(isHtml ? 'html' : 'css').send(body)
+      return
+    }
+    res.sendFile(file, {
+      headers: { ...RUN_HEADERS, 'Cache-Control': ASSET_CACHE },
+      dotfiles: 'deny',
+    })
   })
 
   // Uploaded cover images.

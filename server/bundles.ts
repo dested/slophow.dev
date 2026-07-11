@@ -225,6 +225,67 @@ export function deleteImage(name: string) {
   fs.rmSync(path.join(imagesDir, name), { force: true })
 }
 
+// ── Serve-time absolute-path fixup ──────────────────────────────────────────
+// Bundles are hosted at a subpath (/run/:id/:ver/), but most build tools emit
+// root-absolute URLs — Vite/CRA default to "/assets/x.js", and `public/` assets
+// are referenced as "/tiles/y.png". Served from a subpath those resolve against
+// the site root and 404 (and, from the opaque-origin sandbox, read as CORS
+// errors). We can't ask uploaders to rebuild, so we fix it at serve time:
+//   1. rewrite absolute src/href/poster in HTML and url(/…) in CSS to the base;
+//   2. inject a runtime shim that rewrites absolute URLs *created by JS*
+//      (fetch/XHR/element.src/setAttribute) — the ones static rewriting misses.
+// `base` never has a trailing slash, e.g. "/run/<id>/<ver>".
+
+const ABSOLUTE_ATTR = /\b(src|href|poster)\s*=\s*("|')(\/(?!\/)[^"']*)\2/gi
+const ABSOLUTE_CSS_URL = /url\(\s*("|'|)\/(?!\/)/gi
+
+// Runs inside the sandboxed bundle document, before its own scripts. Blast
+// radius is that one iframe, never slopshow. Kept as a compact IIFE string.
+function runtimeShim(base: string): string {
+  const b = JSON.stringify(base)
+  return (
+    '<script>(function(){var B=' +
+    b +
+    ';function fix(u){if(typeof u!=="string")return u;' +
+    'if(u.charCodeAt(0)!==47||u.charCodeAt(1)===47)return u;' + // not "/…", or is "//…"
+    'if(u.lastIndexOf(B+"/",0)===0)return u;return B+u;}' + // already under base
+    'if(window.fetch){var f=window.fetch;window.fetch=function(i,o){' +
+    'try{if(typeof i==="string")i=fix(i);else if(i&&i.url)i=new Request(fix(i.url),i);}catch(e){}' +
+    'return f.call(this,i,o);};}' +
+    'var xo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){' +
+    'try{arguments[1]=fix(u);}catch(e){}return xo.apply(this,arguments);};' +
+    'var P=[[window.HTMLImageElement,"src"],[window.HTMLScriptElement,"src"],' +
+    '[window.HTMLMediaElement,"src"],[window.HTMLSourceElement,"src"],' +
+    '[window.HTMLLinkElement,"href"],[window.HTMLTrackElement,"src"]];' +
+    'P.forEach(function(p){var C=p[0];if(!C)return;' +
+    'var d=Object.getOwnPropertyDescriptor(C.prototype,p[1]);if(!d||!d.set)return;' +
+    'Object.defineProperty(C.prototype,p[1],{configurable:true,enumerable:d.enumerable,' +
+    'get:d.get,set:function(v){d.set.call(this,fix(v));}});});' +
+    'var sa=Element.prototype.setAttribute;Element.prototype.setAttribute=function(n,v){' +
+    'if(n&&/^(src|href|poster)$/i.test(n))v=fix(v);return sa.call(this,n,v);};' +
+    '})();</script>'
+  )
+}
+
+// Rewrite an HTML entrypoint: fix absolute asset URLs, then inject the shim as
+// early as possible so it patches the network before the app's scripts run.
+export function renderBundleHtml(file: string, base: string): string {
+  let html = fs.readFileSync(file, 'utf8')
+  html = html.replace(ABSOLUTE_ATTR, (_m, attr, q, p) => `${attr}=${q}${base}${p}${q}`)
+  const shim = runtimeShim(base)
+  if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (m) => m + shim)
+  else if (/<html[^>]*>/i.test(html)) html = html.replace(/<html[^>]*>/i, (m) => m + shim)
+  else html = shim + html
+  return html
+}
+
+// Rewrite absolute url(/…) references in a stylesheet (fonts, background images
+// from `public/`). Data URIs, "//host", and full URLs are left untouched.
+export function renderBundleCss(file: string, base: string): string {
+  const css = fs.readFileSync(file, 'utf8')
+  return css.replace(ABSOLUTE_CSS_URL, (_m, q) => `url(${q}${base}/`)
+}
+
 // Resolve a request path inside a project's current bundle, or null if it
 // escapes the root / doesn't exist. Directory requests get index.html.
 export function resolveBundleFile(

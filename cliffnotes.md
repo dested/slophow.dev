@@ -133,6 +133,20 @@ upload and old versions are deleted. Serving: `/run/:id/:version/*` sends files 
 uploaded JS can't touch slopshow cookies/storage. The iframe in `project.tsx` sets the same sandbox
 attribute (kept in sync by hand). The version in the URL makes aggressive caching safe.
 
+**Absolute-path fixup** (the thing that makes arbitrary Vite/CRA builds "just run"): bundles are
+hosted at the subpath `/run/:id/:ver/`, but build tools default to root-absolute URLs (`/assets/x.js`,
+and `public/` assets as `/tiles/y.png`) that assume the app owns the origin root — served from a
+subpath they 404, and from the opaque-origin sandbox read as CORS errors. We fix it at **serve time,
+no rebuild required** (`server/bundles.ts` → `renderBundleHtml`/`renderBundleCss`, wired into the
+`/run` handler in `server.ts`): (1) rewrite absolute `src`/`href`/`poster` in HTML and `url(/…)` in
+CSS to the bundle base; (2) inject a runtime shim at the top of `<head>` that patches
+`fetch`/`XHR`/element `src`·`href`·`setAttribute` so JS-constructed absolute paths (`/tiles/…`) get
+rewritten too; (3) send `Access-Control-Allow-Origin: *` on `/run` responses — module scripts and
+`crossorigin` stylesheets/fonts are fetched in CORS mode from the null origin and are blocked without
+it. HTML/CSS use `must-revalidate` (rewritten per-request); other assets stay `immutable`. Remaining
+gaps needing per-bundle subdomains (not built): CSS `url()` inside `<style>` blocks isn't rewritten,
+and client-side routers that expect to own `/` still won't match paths.
+
 **Upload hardening** (`server/bundles.ts`): zip-bomb guard rejects **before** decompressing via
 fflate's `unzipSync` `filter` (each entry's `originalSize` from the zip header) — >50MB/file or
 
